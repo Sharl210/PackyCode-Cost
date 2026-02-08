@@ -1,0 +1,4 @@
+{
+  "providerKey": "packy-codex",
+  "endpoint": "https://codex.packycode.com/api/backend/users/info"
+}

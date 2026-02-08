@@ -1,0 +1,13 @@
+{
+  "name": "packycode-cost",
+  "version": "0.1.0",
+  "description": "OpenCode plugin: PackyCode usage display and toast",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ]
+}
