@@ -1,4 +1,6 @@
 {
+  "endpoint": "https://codex.packycode.com/api/backend/users/info",
+  "apiKey": "YOUR_PACKYCODE_API_KEY",
   "providerKey": "packy-codex",
-  "endpoint": "https://codex.packycode.com/api/backend/users/info"
+  "toastDuration": 7000
 }
