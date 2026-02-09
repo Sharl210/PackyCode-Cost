@@ -12,6 +12,7 @@ OpenCode 插件，用于显示 PackyCode 账户用量，并在每次模型响应
 - token 数值按千分位显示（例如 12,345）。
 - `providerKey`：仅对指定服务商生效。
 - `toastDuration`：自定义 toast 持续时间（默认 7000ms）。
+- ⚠️ OpenCode Web 模式下插件会自动关闭（不生效，因不兼容）。
 
 ## 安装
 
@@ -116,11 +117,9 @@ npm pack
 将下面内容复制给 LLM，它会在你的机器上完成安装步骤：
 
 ```
-请在我的机器上安装 OpenCode 插件 PackyCode-Cost：
-1) git clone https://github.com/Sharl210/PackyCode-Cost.git
-2) 把仓库复制到 ~/.config/opencode/plugins/packycode-cost
-3) 创建 ~/.config/opencode/packycode-cost.json，写入 endpoint、apiKey、providerKey（可选）、toastDuration（可选）
-4) 提示我重启 OpenCode
+请在我的机器上安装 OpenCode 插件 PackyCode-Cost：https://github.com/Sharl210/PackyCode-Cost
+1）尽可能根据我的提供商配置(端点站为xx.xxopencodexx.xxx的为要填写的提供商，对应的提供商id和api直接填写到对插件的配置文件中），确保完善后的配置文件做到完成就能用
+2) 提示我重启 OpenCode 后生效
 ```
 
 ## 许可证

@@ -213,12 +213,92 @@ async function fetchAccountData() {
   return response.json()
 }
 
+async function sendMessage(client, sessionID, text) {
+  try {
+    await client.session.prompt({
+      path: { id: sessionID },
+      body: {
+        noReply: true,
+        parts: [{ type: "text", text }],
+      },
+    })
+  } catch {
+    // ignore
+  }
+}
+
 export const PackyCodeCostPlugin = async ({ client }) => {
   const toastSeen = new Set()
   const firstPartStartByMessage = {}
+  const userMessageIds = new Set()
+  const handledUserCommands = new Set()
   const config = resolveConfig()
+  const isWebRuntime = () => process.argv.includes("web")
+  const isWebSession = (sessionID) => sessionID?.startsWith("ses_")
+  const handleCommand = async (command, sessionID) => {
+    if (isWebSession(sessionID)) {
+      return false
+    }
+    if (command === "clearcost" || command === "clearallcost") {
+      const state = loadState()
+      const next = { ...state }
+      if (command === "clearcost") {
+        const currentSessionID = sessionID
+        next.sessionTotals = { ...(state.sessionTotals || {}) }
+        next.lastUserTotals = { ...(state.lastUserTotals || {}) }
+        next.sessionStats = { ...(state.sessionStats || {}) }
+        delete next.sessionTotals[currentSessionID]
+        delete next.lastUserTotals[currentSessionID]
+        delete next.sessionStats[currentSessionID]
+      } else {
+        next.sessionTotals = {}
+        next.lastUserTotals = {}
+        next.sessionStats = {}
+        next.providerStats = {}
+        next.lastSessionId = null
+      }
+      writeJson(STATE_FILE, { ...next, updatedAt: Date.now() })
+      const text =
+        command === "clearcost"
+          ? "PackyCode-Cost: 当前会话记录已清除。\n"
+          : "PackyCode-Cost: 全部会话记录已清除。\n"
+      await sendMessage(client, sessionID, text)
+      return true
+    }
+    if (command !== "cost") {
+      return false
+    }
+    const data = await fetchAccountData()
+    const state = data ? loadState() : null
+    const sessionStats = state?.sessionStats?.[sessionID] || null
+    let providerStats = state?.providerStats?.__all__ || null
+    if (!providerStats && state?.sessionStats) {
+      const allStats = makeStats()
+      for (const stats of Object.values(state.sessionStats)) {
+        if (!stats) {
+          continue
+        }
+        allStats.input += n(stats.input)
+        allStats.output += n(stats.output)
+        allStats.cache += n(stats.cache)
+        allStats.latencySum += n(stats.latencySum)
+        allStats.latencyCount += n(stats.latencyCount)
+        allStats.cost += n(stats.cost)
+      }
+      providerStats = allStats
+    }
+    const text = data ? buildOutput(data, sessionStats, providerStats) : "PackyCode-Cost: request failed.\n"
+    if (data) {
+      writeJson(STATE_FILE, { ...state, data, updatedAt: Date.now() })
+    }
+    await sendMessage(client, sessionID, text)
+    return true
+  }
   return {
     config: async (input) => {
+      if (isWebRuntime()) {
+        return
+      }
       const cfg = input
       cfg.command ??= {}
       cfg.command.cost = {
@@ -235,78 +315,8 @@ export const PackyCodeCostPlugin = async ({ client }) => {
       }
     },
     "command.execute.before": async (input) => {
-      if (input.command === "clearcost" || input.command === "clearallcost") {
-        const state = loadState()
-        const next = { ...state }
-        if (input.command === "clearcost") {
-          const sessionID = input.sessionID
-          next.sessionTotals = { ...(state.sessionTotals || {}) }
-          next.lastUserTotals = { ...(state.lastUserTotals || {}) }
-          next.sessionStats = { ...(state.sessionStats || {}) }
-          delete next.sessionTotals[sessionID]
-          delete next.lastUserTotals[sessionID]
-          delete next.sessionStats[sessionID]
-        } else {
-          next.sessionTotals = {}
-          next.lastUserTotals = {}
-          next.sessionStats = {}
-          next.providerStats = {}
-          next.lastSessionId = null
-        }
-        writeJson(STATE_FILE, { ...next, updatedAt: Date.now() })
-        const text =
-          input.command === "clearcost"
-            ? "PackyCode-Cost: 当前会话记录已清除。\n"
-            : "PackyCode-Cost: 全部会话记录已清除。\n"
-        try {
-          await client.session.prompt({
-            path: { id: input.sessionID },
-            body: {
-              noReply: true,
-              parts: [{ type: "text", text, ignored: true }],
-            },
-          })
-        } catch {
-          // ignore
-        }
-        throw new Error("__QUOTA_COMMAND_HANDLED__")
-      }
-      if (input.command !== "cost") {
+      if (!(await handleCommand(input.command, input.sessionID))) {
         return
-      }
-      const data = await fetchAccountData()
-      const state = data ? loadState() : null
-      const sessionStats = state?.sessionStats?.[input.sessionID] || null
-      let providerStats = state?.providerStats?.__all__ || null
-      if (!providerStats && state?.sessionStats) {
-        const allStats = makeStats()
-        for (const stats of Object.values(state.sessionStats)) {
-          if (!stats) {
-            continue
-          }
-          allStats.input += n(stats.input)
-          allStats.output += n(stats.output)
-          allStats.cache += n(stats.cache)
-          allStats.latencySum += n(stats.latencySum)
-          allStats.latencyCount += n(stats.latencyCount)
-          allStats.cost += n(stats.cost)
-        }
-        providerStats = allStats
-      }
-      const text = data ? buildOutput(data, sessionStats, providerStats) : "PackyCode-Cost: request failed.\n"
-      if (data) {
-        writeJson(STATE_FILE, { ...state, data, updatedAt: Date.now() })
-      }
-      try {
-        await client.session.prompt({
-          path: { id: input.sessionID },
-          body: {
-            noReply: true,
-            parts: [{ type: "text", text, ignored: true }],
-          },
-        })
-      } catch {
-        // ignore
       }
       throw new Error("__QUOTA_COMMAND_HANDLED__")
     },
@@ -321,6 +331,21 @@ export const PackyCodeCostPlugin = async ({ client }) => {
             firstPartStartByMessage[part.messageID] = start
           }
         }
+        if (
+          part?.type === "text" &&
+          part.messageID &&
+          userMessageIds.has(part.messageID) &&
+          !handledUserCommands.has(part.messageID) &&
+          !part.synthetic &&
+          !part.ignored
+        ) {
+          const text = part.text?.trim() || ""
+          const command = text.replace(/^\//, "")
+          if (command === "cost" || command === "clearcost" || command === "clearallcost") {
+            handledUserCommands.add(part.messageID)
+            await handleCommand(command, part.sessionID)
+          }
+        }
         return
       }
       if (eventType !== "message.updated") {
@@ -331,6 +356,7 @@ export const PackyCodeCostPlugin = async ({ client }) => {
         return
       }
       if (info.role === "user") {
+        userMessageIds.add(info.id)
         const data = await fetchAccountData()
         if (!data) {
           return
@@ -455,14 +481,29 @@ export const PackyCodeCostPlugin = async ({ client }) => {
       })
       const dailySpent = moneyFine(data?.daily_spent_usd)
       const dailyBudget = moneyFine(data?.daily_budget_usd)
-      await client.tui.showToast({
-        body: {
-          title: "PackyCodeCost",
-          message: `${metricsLine}\n💰 本次：${moneyFine(delta)} | 当前会话：${moneyFine(sessionTotals[info.sessionID])}\n📆 今日已用：${dailySpent} / ${dailyBudget}`,
-          variant: "info",
-          duration: config.toastDuration,
-        },
-      })
+      const toastText = `${metricsLine}\n💰 本次：${moneyFine(delta)} | 当前会话：${moneyFine(sessionTotals[info.sessionID])}\n📆 今日已用：${dailySpent} / ${dailyBudget}`
+      try {
+        await client.tui.showToast({
+          body: {
+            title: "PackyCodeCost",
+            message: toastText,
+            variant: "info",
+            duration: config.toastDuration,
+          },
+        })
+      } catch {
+        try {
+          await client.session.prompt({
+            path: { id: info.sessionID },
+            body: {
+              noReply: true,
+              parts: [{ type: "text", text: `PackyCodeCost\n${toastText}` }],
+            },
+          })
+        } catch {
+          // ignore
+        }
+      }
     },
   }
 }
