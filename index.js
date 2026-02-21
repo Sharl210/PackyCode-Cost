@@ -234,15 +234,22 @@ export const PackyCodeCostPlugin = async ({ client }) => {
   const handledUserCommands = new Set()
   const config = resolveConfig()
   const isWebRuntime = () => process.argv.includes("web")
-  const isWebSession = (sessionID) => sessionID?.startsWith("ses_")
+  const normalizeCommand = (value) => {
+    if (typeof value !== "string") {
+      return ""
+    }
+    const text = value.trim()
+    return text.startsWith("/") ? text.slice(1) : text
+  }
   const handleCommand = async (command, sessionID) => {
-    if (isWebSession(sessionID)) {
+    if (isWebRuntime()) {
       return false
     }
-    if (command === "clearcost" || command === "clearallcost") {
+    const normalized = normalizeCommand(command)
+    if (normalized === "clearcost" || normalized === "clearallcost") {
       const state = loadState()
       const next = { ...state }
-      if (command === "clearcost") {
+      if (normalized === "clearcost") {
         const currentSessionID = sessionID
         next.sessionTotals = { ...(state.sessionTotals || {}) }
         next.lastUserTotals = { ...(state.lastUserTotals || {}) }
@@ -259,13 +266,13 @@ export const PackyCodeCostPlugin = async ({ client }) => {
       }
       writeJson(STATE_FILE, { ...next, updatedAt: Date.now() })
       const text =
-        command === "clearcost"
+        normalized === "clearcost"
           ? "PackyCode-Cost: 当前会话记录已清除。\n"
           : "PackyCode-Cost: 全部会话记录已清除。\n"
       await sendMessage(client, sessionID, text)
       return true
     }
-    if (command !== "cost") {
+    if (normalized !== "cost") {
       return false
     }
     const data = await fetchAccountData()
